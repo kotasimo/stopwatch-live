@@ -1,8 +1,15 @@
-import { type CSSProperties, useEffect, useState } from "react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { StopwatchCard } from "./stopwatchCard";
 import { LapTable } from "./LapTable";
 import { Analytics } from "@vercel/analytics/react";
 import { INFO } from "./info";
+import { supabase } from "./lib/supabase";
 
 type Lap = {
   lap: number;
@@ -24,8 +31,22 @@ type StopwatchItem = {
 type Screen = "home" | "stopwatch";
 type Variant = "A" | "B" | "C" | "D" | "D2" | "E";
 type GridColumns = 1 | 2 | 3 | 4;
+type LiveRole = "host" | "viewer";
+type LiveSnapshot = {
+  variant: Variant;
+  gridColumns: GridColumns;
+  sharedElapsedTime: number;
+  sharedStatus: "idle" | "running" | "stopped";
+  stopwatches: StopwatchItem[];
+};
 
 export default function App() {
+  const initialParams = new URLSearchParams(window.location.search);
+  const initialRoomId = initialParams.get("room");
+  const initialVariant = initialParams.get("v") as Variant | null;
+  const initialRole: LiveRole =
+    initialParams.get("host") === "1" ? "host" : "viewer";
+
   const createStopwatch = (id: number): StopwatchItem => ({
     id,
     name: "",
@@ -48,15 +69,35 @@ export default function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [draggingId, setDraggingId] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
-  const [screen, setScreen] = useState<Screen>("home");
-  const [variant, setVariant] = useState<Variant>("A");
+  const [screen, setScreen] = useState<Screen>(
+    initialRoomId ? "stopwatch" : "home",
+  );
+  const [variant, setVariant] = useState<Variant>(
+    initialVariant &&
+      ["A", "B", "C", "D", "D2", "E"].includes(initialVariant)
+      ? initialVariant
+      : "A",
+  );
   const [gridColumns, setGridColumns] = useState<GridColumns>(2);
   const [sharedElapsedTime, setSharedElapsedTime] = useState(0);
   const [sharedStartedAt, setSharedStartedAt] = useState<number | null>(null);
   const [sharedStatus, setSharedStatus] =
     useState<"idle" | "running" | "stopped">("idle");
+  const [liveRoomId, setLiveRoomId] = useState<string | null>(initialRoomId);
+  const [liveRole, setLiveRole] = useState<LiveRole>(initialRole);
+  const [liveStatus, setLiveStatus] = useState("offline");
+  const [viewerUrl, setViewerUrl] = useState("");
+  const liveChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(
+    null,
+  );
+  const localBroadcastRef = useRef<BroadcastChannel | null>(null);
+  const liveSnapshotRef = useRef<LiveSnapshot | null>(null);
+
+  const isLiveHost = liveRoomId !== null && liveRole === "host";
+  const isLiveViewer = liveRoomId !== null && liveRole === "viewer";
 
   const addStopwatch = () => {
+    if (isLiveViewer) return;
     const newId = Date.now();
     setStopwatches((prev) => [...prev, createStopwatch(newId)]);
   };
@@ -71,6 +112,7 @@ export default function App() {
   };
 
   const changeName = (id: number, name: string) => {
+    if (isLiveViewer) return;
     updateStopwatch(id, (sw) => ({
       ...sw,
       name,
@@ -78,6 +120,7 @@ export default function App() {
   };
 
   const startStopwatch = (id: number) => {
+    if (isLiveViewer) return;
     updateStopwatch(id, (sw) => {
       if (sw.status === "running") return sw;
 
@@ -90,6 +133,7 @@ export default function App() {
   };
 
   const stopStopwatch = (id: number) => {
+    if (isLiveViewer) return;
     updateStopwatch(id, (sw) => {
       if (sw.status !== "running") return sw;
 
@@ -102,6 +146,7 @@ export default function App() {
   };
 
   const startSharedTimer = () => {
+    if (isLiveViewer) return;
     if (sharedStatus === "running") return;
 
     setSharedStatus("running");
@@ -109,6 +154,7 @@ export default function App() {
   };
 
   const stopSharedTimer = () => {
+    if (isLiveViewer) return;
     if (sharedStatus !== "running") return;
 
     setSharedStatus("stopped");
@@ -116,6 +162,7 @@ export default function App() {
   };
 
   const resetSharedTimer = () => {
+    if (isLiveViewer) return;
     setSharedStatus("idle");
     setSharedElapsedTime(0);
     setSharedStartedAt(null);
@@ -130,6 +177,7 @@ export default function App() {
   };
 
   const resetStopwatch = (id: number) => {
+    if (isLiveViewer) return;
     updateStopwatch(id, (sw) => ({
       ...sw,
       status: "idle",
@@ -141,6 +189,7 @@ export default function App() {
   };
 
   const lapStopwatch = (id: number) => {
+    if (isLiveViewer) return;
     updateStopwatch(id, (sw) => {
       const isC = variant === "C" || variant === "E";
 
@@ -203,6 +252,7 @@ export default function App() {
   }, [sharedStatus, sharedStartedAt]);
 
   const removeStopwatch = () => {
+    if (isLiveViewer) return;
     setStopwatches((prev) => {
       if (prev.length === 0) return prev;
       return prev.slice(0, -1);
@@ -236,6 +286,7 @@ export default function App() {
 
 
   const duplicateStopwatch = (id: number) => {
+    if (isLiveViewer) return;
     setStopwatches((prev) => {
       const targetIndex = prev.findIndex((sw) => sw.id === id);
       if (targetIndex === -1) return prev;
@@ -261,10 +312,12 @@ export default function App() {
   };
 
   const removeStopwatchById = (id: number) => {
+    if (isLiveViewer) return;
     setStopwatches((prev) => prev.filter((sw) => sw.id !== id));
   };
 
   const reorderStopwatch = (dragId: number, hoverId: number) => {
+    if (isLiveViewer) return;
     setStopwatches((prev) => {
       const dragIndex = prev.findIndex((sw) => sw.id === dragId);
       const hoverIndex = prev.findIndex((sw) => sw.id === hoverId);
@@ -313,6 +366,148 @@ export default function App() {
   const cycleGridColumns = () => {
     setGridColumns((current) => (current === 4 ? 1 : ((current + 1) as GridColumns)));
   };
+
+  const makeRoomId = () => {
+    if ("randomUUID" in crypto) return crypto.randomUUID().slice(0, 8);
+    return Math.random().toString(36).slice(2, 10);
+  };
+
+  const updateLiveUrl = (roomId: string, role: LiveRole, nextVariant: Variant) => {
+    const params = new URLSearchParams();
+    params.set("room", roomId);
+    params.set("v", nextVariant);
+    if (role === "host") params.set("host", "1");
+    window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
+  };
+
+  const ensureLiveHostRoom = () => {
+    const roomId = liveRoomId ?? makeRoomId();
+    setLiveRoomId(roomId);
+    setLiveRole("host");
+    updateLiveUrl(roomId, "host", variant);
+    return roomId;
+  };
+
+  const showViewerUrl = () => {
+    const roomId = ensureLiveHostRoom();
+    const params = new URLSearchParams();
+    params.set("room", roomId);
+    params.set("v", variant);
+    const url = `${window.location.origin}${window.location.pathname}?${params}`;
+    setViewerUrl(url);
+  };
+
+  const goHome = () => {
+    if (!isLiveViewer) {
+      resetSharedTimer();
+    }
+
+    setStopwatches([
+      createStopwatch(1),
+      createStopwatch(2),
+      createStopwatch(3),
+    ]);
+    setLiveRoomId(null);
+    setLiveRole("host");
+    setLiveStatus("offline");
+    setViewerUrl("");
+    window.history.replaceState(null, "", window.location.pathname);
+    setScreen("home");
+  };
+
+  const applyLiveSnapshot = useCallback((snapshot: LiveSnapshot) => {
+    const now = Date.now();
+    setVariant(snapshot.variant);
+    setSharedStatus(snapshot.sharedStatus);
+    setSharedElapsedTime(snapshot.sharedElapsedTime);
+    setSharedStartedAt(
+      snapshot.sharedStatus === "running"
+        ? now - snapshot.sharedElapsedTime
+        : null,
+    );
+    setStopwatches((current) =>
+      snapshot.stopwatches.map((sw) => {
+        const localStopwatch = current.find((item) => item.id === sw.id);
+
+        return {
+          ...sw,
+          showLaps: localStopwatch?.showLaps ?? false,
+          startedAt: sw.status === "running" ? now - sw.elapsedTime : null,
+        };
+      }),
+    );
+  }, []);
+
+  const broadcastLiveSnapshot = useCallback(() => {
+    if (!isLiveHost || !liveChannelRef.current || !liveSnapshotRef.current) {
+      return;
+    }
+
+    liveChannelRef.current.send({
+      type: "broadcast",
+      event: "state",
+      payload: liveSnapshotRef.current,
+    });
+    localBroadcastRef.current?.postMessage(liveSnapshotRef.current);
+  }, [isLiveHost]);
+
+  useEffect(() => {
+    liveSnapshotRef.current = {
+      variant,
+      gridColumns,
+      sharedElapsedTime,
+      sharedStatus,
+      stopwatches,
+    };
+  }, [gridColumns, sharedElapsedTime, sharedStatus, stopwatches, variant]);
+
+  useEffect(() => {
+    if (!liveRoomId) return;
+
+    const localChannel =
+      "BroadcastChannel" in window
+        ? new BroadcastChannel(`stopwatch:${liveRoomId}`)
+        : null;
+
+    localBroadcastRef.current = localChannel;
+    if (localChannel) {
+      localChannel.onmessage = ({ data }) => {
+        if (liveRole === "viewer") {
+          applyLiveSnapshot(data as LiveSnapshot);
+        }
+      };
+    }
+
+    const channel = supabase
+      .channel(`stopwatch:${liveRoomId}`)
+      .on("broadcast", { event: "state" }, ({ payload }) => {
+        if (liveRole === "viewer") {
+          applyLiveSnapshot(payload as LiveSnapshot);
+        }
+      })
+      .subscribe((status) => {
+        setLiveStatus(status);
+        if (status === "SUBSCRIBED" && liveRole === "host") {
+          window.setTimeout(broadcastLiveSnapshot, 0);
+        }
+      });
+
+    liveChannelRef.current = channel;
+
+    return () => {
+      liveChannelRef.current = null;
+      localBroadcastRef.current = null;
+      localChannel?.close();
+      supabase.removeChannel(channel);
+    };
+  }, [applyLiveSnapshot, broadcastLiveSnapshot, liveRoomId, liveRole]);
+
+  useEffect(() => {
+    if (!isLiveHost) return;
+
+    const interval = window.setInterval(broadcastLiveSnapshot, 250);
+    return () => clearInterval(interval);
+  }, [broadcastLiveSnapshot, isLiveHost]);
 
   if (screen === "home") {
     return (
@@ -410,32 +605,46 @@ export default function App() {
               </div>
             </span>
 
-            {sharedStatus !== "running" ? (
-              <button
-                onClick={startSharedTimer}
-                className="rounded-md bg-indigo-400 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500"
-              >
-                START
-              </button>
-            ) : (
-              <button
-                onClick={stopSharedTimer}
-                className="rounded-md bg-indigo-500 px-3 py-1.5 text-sm font-semibold text-white"
-              >
-                STOP
-              </button>
-            )}
+            {!isLiveViewer && (
+              <>
+                {sharedStatus !== "running" ? (
+                  <button
+                    onClick={startSharedTimer}
+                    className="rounded-md bg-indigo-400 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500"
+                  >
+                    START
+                  </button>
+                ) : (
+                  <button
+                    onClick={stopSharedTimer}
+                    className="rounded-md bg-indigo-500 px-3 py-1.5 text-sm font-semibold text-white"
+                  >
+                    STOP
+                  </button>
+                )}
 
-            <button
-              onClick={resetSharedTimer}
-              className="rounded-md bg-white/30 px-3 py-1.5 text-sm text-slate-100 hover:bg-white/10"
-            >
-              RESET
-            </button>
+                <button
+                  onClick={resetSharedTimer}
+                  className="rounded-md bg-white/30 px-3 py-1.5 text-sm text-slate-100 hover:bg-white/10"
+                >
+                  RESET
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
       <div className={`stopwatch-page-shell mx-auto w-full max-w-7xl py-10 ${variant === "C" || variant === "E" ? "has-shared-timer pt-20" : ""}`}>
+        {isLiveViewer && (
+          <div className="mb-3 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-center text-sm font-semibold text-emerald-100">
+            Live viewer mode
+          </div>
+        )}
+        {liveRoomId && (
+          <div className="mb-3 rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-2 text-center text-xs text-slate-300">
+            room: {liveRoomId} / realtime: {liveStatus}
+          </div>
+        )}
         <div className="flex flex-col xl:flex-row gap-4">
           <div
             className="stopwatch-grid-phone grid flex-1"
@@ -491,6 +700,7 @@ export default function App() {
                   onDragEnd={() => setDraggingId(null)}
                   isDragging={draggingId === sw.id}
                   isNew={sw.isNew}
+                  readOnly={isLiveViewer}
 
                 />
               </div>
@@ -524,6 +734,22 @@ export default function App() {
             >
               {gridColumns}列
             </button>
+            {!isLiveViewer && (
+              <button
+                onClick={showViewerUrl}
+                className="rounded-full bg-emerald-700 px-4 py-2 hover:bg-emerald-600 text-sm font-bold"
+              >
+                Share
+              </button>
+            )}
+            {viewerUrl && (
+              <input
+                readOnly
+                value={viewerUrl}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-44 rounded-lg border border-emerald-500/30 bg-slate-950 px-3 py-2 text-xs text-emerald-100"
+              />
+            )}
             {/* <button
               onClick={() => setShowInfo(true)}
               className="rounded-full bg-slate-800 px-4 py-2 hover:bg-slate-700 text-sm font-bold "
@@ -532,24 +758,24 @@ export default function App() {
               i
             </button> */}
             <button
-              onClick={() => {
-                resetSharedTimer();
-
-                setStopwatches([
-                  createStopwatch(1),
-                  createStopwatch(2),
-                  createStopwatch(3),
-                ]);
-
-                setScreen("home");
-              }}
+              onClick={goHome}
               className="rounded-full bg-slate-800 px-4 py-2 hover:bg-slate-700 text-sm font-bold"
             >
               Home
             </button>
           </div>
           <div className="mobile-bottom-nav fixed bottom-0 left-0 w-full z-50 bg-slate-900/95 backdrop-blur border-t border-slate-700 xl:hidden flex">
-            <div className="mobile-bottom-nav-grid fixed bottom-0 left-0 z-50 grid h-14 w-full grid-cols-5 border-t border-slate-700 bg-slate-900/95 backdrop-blur xl:hidden">
+            {viewerUrl && !isLiveViewer && (
+              <div className="fixed bottom-16 left-3 right-3 z-50 rounded-xl border border-emerald-500/30 bg-slate-950/95 p-2">
+                <input
+                  readOnly
+                  value={viewerUrl}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full rounded-lg bg-black px-3 py-2 text-xs text-emerald-100"
+                />
+              </div>
+            )}
+            <div className={`mobile-bottom-nav-grid fixed bottom-0 left-0 z-50 grid h-14 w-full ${isLiveViewer ? "grid-cols-5" : "grid-cols-6"} border-t border-slate-700 bg-slate-900/95 backdrop-blur xl:hidden`}>
               <button
                 onClick={addStopwatch}
                 className="h-full w-full text-sm border-r border-slate-700 font-bold text-slate-200 transition-all duration-100 hover:bg-slate-700 active:scale-95 active:bg-slate-700"
@@ -571,14 +797,14 @@ export default function App() {
                 {t.history}
               </button>
 
-              
-                <button
-                  onClick={cycleGridColumns}
-                  className="h-full w-full text-sm border-r border-slate-700 font-bold text-slate-200 transition-all duration-100 hover:bg-slate-700 active:scale-95 active:bg-slate-700"
-                >
-                  {gridColumns}列
-                </button>
-              
+
+              <button
+                onClick={cycleGridColumns}
+                className="h-full w-full text-sm border-r border-slate-700 font-bold text-slate-200 transition-all duration-100 hover:bg-slate-700 active:scale-95 active:bg-slate-700"
+              >
+                {gridColumns}列
+              </button>
+
 
               {/* <button
                 onClick={() => setShowInfo(true)}
@@ -588,18 +814,17 @@ export default function App() {
                 i
               </button> */}
 
+              {!isLiveViewer && (
+                <button
+                  onClick={showViewerUrl}
+                  className="h-full w-full text-sm border-r border-slate-700 font-bold text-slate-200 transition-all duration-100 hover:bg-slate-700 active:scale-95 active:bg-slate-700"
+                >
+                  Share
+                </button>
+              )}
+
               <button
-                onClick={() => {
-                  resetSharedTimer();
-
-                  setStopwatches([
-                    createStopwatch(1),
-                    createStopwatch(2),
-                    createStopwatch(3),
-                  ]);
-
-                  setScreen("home");
-                }}
+                onClick={goHome}
                 className="h-full w-full text-sm font-bold text-slate-200 transition-all duration-100 hover:bg-slate-700 active:scale-95 active:bg-slate-700"
                 translate="no"
               >

@@ -32,6 +32,7 @@ type StopwatchCardProps = {
   onDragEnd: () => void;
   isDragging: boolean;
   isNew?: boolean;
+  readOnly?: boolean;
 };
 
 export const StopwatchCard = ({
@@ -55,7 +56,8 @@ export const StopwatchCard = ({
   onDragEnter,
   onDragEnd,
   isDragging,
-  isNew
+  isNew,
+  readOnly = false,
 }: StopwatchCardProps) => {
   const isPhoneTwoColumnVariant =
     variant === "D" || variant === "D2" || variant === "E";
@@ -96,9 +98,13 @@ export const StopwatchCard = ({
   return (
     <div
       className={`stopwatch-card ${variant === "C" || variant === "E" ? "compact" : ""} ${isPhoneTwoColumnVariant ? "phone-two-column" : ""} ${isDragging ? "dragging" : ""} ${isNew ? "new-card" : ""}`}
-      draggable
-      onDragStart={() => onDragStart(stopwatchId)}
-      onDragEnter={() => onDragEnter(stopwatchId)}
+      draggable={!readOnly}
+      onDragStart={() => {
+        if (!readOnly) onDragStart(stopwatchId);
+      }}
+      onDragEnter={() => {
+        if (!readOnly) onDragEnter(stopwatchId);
+      }}
       onDragOver={(e) => e.preventDefault()}
       onDragEnd={onDragEnd}
 
@@ -114,7 +120,8 @@ export const StopwatchCard = ({
 
           <button
             onClick={() => onRemove(stopwatchId)}
-            className="stopwatch-icon-button bg-red-500/70"
+            disabled={readOnly}
+            className={`stopwatch-icon-button bg-red-500/70 ${readOnly ? "hidden" : ""}`}
           >
             ✕
           </button>
@@ -124,13 +131,15 @@ export const StopwatchCard = ({
             onChange={(e) => onChangeName(stopwatchId, e.target.value)}
             className="min-w-0 name text-xs"
             placeholder="name"
+            disabled={readOnly}
           />
 
           {/* 右：ボタンまとめる */}
           <div className="flex gap-1 shrink-0">
             <button
               onClick={() => onDuplicate(stopwatchId)}
-              className="stopwatch-icon-button bg-blue-500/70"
+              disabled={readOnly}
+              className={`stopwatch-icon-button bg-blue-500/70 ${readOnly ? "hidden" : ""}`}
             >
               ＋
             </button>
@@ -184,21 +193,23 @@ export const StopwatchCard = ({
         </div>
 
         <div className="stopwatch-controls-row">
-          <Controls
-            statusConf={status}
-            onStart={
-              variant === "C" || variant === "E" ? undefined : () => onStart(stopwatchId)
-            }
-            onStop={
-              variant === "C" || variant === "E" ? undefined : () => onStop(stopwatchId)
-            }
-            onReset={
-              variant === "D" || variant === "D2" || variant === "C" || variant === "E"
-                ? undefined
-                : () => onReset(stopwatchId)
-            }
-            onLap={() => onLap(stopwatchId)}
-          />
+          {!readOnly && (
+            <Controls
+              statusConf={status}
+              onStart={
+                variant === "C" || variant === "E" ? undefined : () => onStart(stopwatchId)
+              }
+              onStop={
+                variant === "C" || variant === "E" ? undefined : () => onStop(stopwatchId)
+              }
+              onReset={
+                variant === "D" || variant === "D2" || variant === "C" || variant === "E"
+                  ? undefined
+                  : () => onReset(stopwatchId)
+              }
+              onLap={() => onLap(stopwatchId)}
+            />
+          )}
         </div>
       </div>
 
