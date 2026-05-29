@@ -29,12 +29,22 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   if (recetitle) {
     const safe = escapeHtml(recetitle)
     html += `<title>${safe}</title>`
+    // Primary title (used by most scrapers)
     html += `<meta property="og:title" content="${safe}" />`
+    // Ensure site name and description are empty so platforms don't show extra text
+    html += `<meta property="og:site_name" content="" />`
+    html += `<meta name="description" content="" />`
+    html += `<meta property="og:description" content="" />`
+    // Twitter cards
     html += `<meta name="twitter:card" content="summary" />`
-    // Intentionally omit og:description and og:image to keep preview minimal
+    html += `<meta name="twitter:title" content="${safe}" />`
+    html += `<meta name="twitter:site" content="" />`
   } else {
     // No recetitle: produce minimal page so most link previews won't show extra info
     html += `<title></title>`
+    html += `<meta property="og:site_name" content="" />`
+    html += `<meta name="description" content="" />`
+    html += `<meta property="og:description" content="" />`
     html += `<meta name="robots" content="noimageindex" />`
   }
 
