@@ -1825,7 +1825,7 @@ export default function App() {
                           lastLapTime,
                           splitTime,
                           onClick: isRaceMoveSelecting
-                            ? () => undefined
+                            ? () => moveSelectedRaceAthletesToGroup(group.id)
                             : () => toggleRaceLapHistory(group.id),
                         })}
                       </div>
@@ -1867,9 +1867,14 @@ export default function App() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (isRaceMoveSelecting) {
+                                moveSelectedRaceAthletesToGroup(group.id);
+                                return;
+                              }
+
                               lapRaceGroup(group.id);
                             }}
-                            disabled={raceStatus !== "running"}
+                            disabled={!isRaceMoveSelecting && raceStatus !== "running"}
                             className="inline-flex items-center justify-center rounded-xl bg-indigo-500 px-4 py-3 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 ring-1 ring-inset ring-white/10 transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             LAP
