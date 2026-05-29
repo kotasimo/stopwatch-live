@@ -1,5 +1,7 @@
 import {
+  Fragment,
   type CSSProperties,
+  type PointerEvent,
   useCallback,
   useEffect,
   useRef,
@@ -80,6 +82,12 @@ export default function App() {
     startedAt: null,
   });
 
+  const createInitialRaceAthletes = (): Athlete[] => [
+    { id: "athlete-1", name: "" },
+    { id: "athlete-2", name: "" },
+    { id: "athlete-3", name: "" },
+  ];
+
   const [stopwatches, setStopwatches] = useState<StopwatchItem[]>([
     createStopwatch(1),
     createStopwatch(2),
@@ -110,11 +118,9 @@ export default function App() {
   const [liveRole, setLiveRole] = useState<LiveRole>(initialRole);
   const [liveStatus, setLiveStatus] = useState("offline");
   const [viewerUrl, setViewerUrl] = useState("");
-  const [athletes, setAthletes] = useState<Athlete[]>([
-    { id: "athlete-1", name: "" },
-    { id: "athlete-2", name: "" },
-    { id: "athlete-3", name: "" },
-  ]);
+  const [athletes, setAthletes] = useState<Athlete[]>(
+    createInitialRaceAthletes,
+  );
   const [raceGroups, setRaceGroups] = useState<RaceGroup[]>([]);
   const [raceAthleteLaps, setRaceAthleteLaps] = useState<Record<string, Lap[]>>(
     {},
@@ -124,12 +130,35 @@ export default function App() {
   const [raceElapsedTime, setRaceElapsedTime] = useState(0);
   const [raceStartedAt, setRaceStartedAt] = useState<number | null>(null);
   const [selectedAthleteIds, setSelectedAthleteIds] = useState<string[]>([]);
+  const [raceLapFlashGroupIds, setRaceLapFlashGroupIds] = useState<string[]>(
+    [],
+  );
+  const [raceAthleteDrag, setRaceAthleteDrag] = useState<{
+    athleteId: string;
+    x: number;
+    y: number;
+    isNewGroupTarget: boolean;
+    newGroupIndex: number;
+  } | null>(null);
   const [raceGridColumns, setRaceGridColumns] = useState<GridColumns>(2);
   const liveChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(
     null,
   );
   const localBroadcastRef = useRef<BroadcastChannel | null>(null);
   const liveSnapshotRef = useRef<LiveSnapshot | null>(null);
+  const raceAthleteDragStartRef = useRef<{
+    athleteId: string;
+    pointerId: number;
+    pointerType: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const raceAthleteDragActiveRef = useRef(false);
+  const raceAthleteDragReadyRef = useRef(false);
+  const raceAthleteLongPressTimeoutRef = useRef<number | null>(null);
+  const suppressRaceAthleteClickRef = useRef(false);
+  const previousViewerRaceLapCountsRef = useRef<Record<string, number>>({});
+  const hasViewerRaceLapCountsRef = useRef(false);
 
   const isLiveHost = liveRoomId !== null && liveRole === "host";
   const isLiveViewer = liveRoomId !== null && liveRole === "viewer";
@@ -455,15 +484,26 @@ export default function App() {
     setRaceStartedAt(null);
   };
 
-  const resetRace = () => {
+  const resetRaceToInitial = () => {
     if (isLiveViewer) return;
+    setAthletes(createInitialRaceAthletes());
     setRaceGroups([]);
     setRaceAthleteLaps({});
     setSelectedAthleteIds([]);
+    setRaceLapFlashGroupIds([]);
+    setRaceAthleteDrag(null);
     setRaceElapsedTime(0);
     setRaceStartedAt(null);
     setIsRaceEditing(false);
+    setRaceGridColumns(2);
+    setShowHistory(false);
     setRaceStatus("setup");
+    previousViewerRaceLapCountsRef.current = {};
+    hasViewerRaceLapCountsRef.current = false;
+  };
+
+  const resetRace = () => {
+    resetRaceToInitial();
   };
 
   const toggleRaceLapHistory = (groupId: string) => {
@@ -476,12 +516,23 @@ export default function App() {
     );
   };
 
+  const flashRaceLap = (groupId: string) => {
+    setRaceLapFlashGroupIds((prev) =>
+      prev.includes(groupId) ? prev : [...prev, groupId],
+    );
+    window.setTimeout(() => {
+      setRaceLapFlashGroupIds((prev) => prev.filter((id) => id !== groupId));
+    }, 260);
+  };
+
   const lapRaceGroup = (groupId: string) => {
     if (isLiveViewer) return;
     if (raceStatus !== "running") return;
 
     const targetGroup = raceGroups.find((group) => group.id === groupId);
     if (!targetGroup) return;
+
+    flashRaceLap(groupId);
 
     setRaceAthleteLaps((prev) => {
       const next = { ...prev };
@@ -507,6 +558,10 @@ export default function App() {
 
   const toggleAthleteSelection = (athleteId: string) => {
     if (isLiveViewer) return;
+    if (suppressRaceAthleteClickRef.current) {
+      suppressRaceAthleteClickRef.current = false;
+      return;
+    }
     setSelectedAthleteIds((prev) =>
       prev.includes(athleteId)
         ? prev.filter((id) => id !== athleteId)
@@ -514,22 +569,53 @@ export default function App() {
     );
   };
 
-  const moveSelectedAthletesToGroup = (targetGroupId: string) => {
-    if (isLiveViewer || selectedAthleteIds.length === 0) return;
+  const getSelectedRaceMoveAthleteIds = () => selectedAthleteIds;
+
+  const moveSelectedRaceAthletesToGroup = (targetGroupId: string) => {
+    const athleteIds = getSelectedRaceMoveAthleteIds();
+    if (athleteIds.length === 0 || isLiveViewer || raceStatus === "setup") {
+      return;
+    }
+
+    moveRaceAthletesToGroup(athleteIds, targetGroupId);
+  };
+
+  const moveSelectedRaceAthletesToNewGroup = (insertIndex: number) => {
+    const athleteIds = getSelectedRaceMoveAthleteIds();
+    if (athleteIds.length === 0 || isLiveViewer || raceStatus === "setup") {
+      return;
+    }
+
+    moveRaceAthletesToNewGroup(athleteIds, insertIndex);
+  };
+
+  const moveRaceAthleteToGroup = (athleteId: string, targetGroupId: string) => {
+    moveRaceAthletesToGroup([athleteId], targetGroupId);
+  };
+
+  const moveRaceAthletesToGroup = (
+    athleteIds: string[],
+    targetGroupId: string,
+  ) => {
+    if (isLiveViewer) return;
+    const movingIds = Array.from(new Set(athleteIds));
 
     setRaceGroups((prev) => {
-      const movableIds = selectedAthleteIds.filter((athleteId) =>
+      const existingMovingIds = movingIds.filter((athleteId) =>
         prev.some((group) => group.athleteIds.includes(athleteId)),
       );
+      const targetGroup = prev.find((group) => group.id === targetGroupId);
 
-      if (movableIds.length === 0) return prev;
+      if (existingMovingIds.length === 0 || !targetGroup) {
+        return prev;
+      }
 
       return prev
         .map((group) => {
           if (group.id === targetGroupId) {
             const nextAthleteIds = [
               ...group.athleteIds,
-              ...movableIds.filter(
+              ...existingMovingIds.filter(
                 (athleteId) => !group.athleteIds.includes(athleteId),
               ),
             ];
@@ -543,38 +629,219 @@ export default function App() {
           return {
             ...group,
             athleteIds: group.athleteIds.filter(
-              (athleteId) => !movableIds.includes(athleteId),
+              (id) => !existingMovingIds.includes(id),
             ),
           };
         })
         .filter((group) => group.athleteIds.length > 0);
     });
-    setSelectedAthleteIds([]);
+    setSelectedAthleteIds((prev) =>
+      prev.filter((id) => !movingIds.includes(id)),
+    );
   };
 
-  const moveSelectedAthletesToNewGroup = () => {
-    if (isLiveViewer || selectedAthleteIds.length === 0) return;
+  const moveRaceAthleteToNewGroup = (
+    athleteId: string,
+    insertIndex: number,
+  ) => {
+    moveRaceAthletesToNewGroup([athleteId], insertIndex);
+  };
+
+  const moveRaceAthletesToNewGroup = (
+    athleteIds: string[],
+    insertIndex: number,
+  ) => {
+    if (isLiveViewer) return;
+    const movingIds = Array.from(new Set(athleteIds));
 
     setRaceGroups((prev) => {
-      const movableIds = selectedAthleteIds.filter((athleteId) =>
+      const existingMovingIds = movingIds.filter((athleteId) =>
         prev.some((group) => group.athleteIds.includes(athleteId)),
       );
 
-      if (movableIds.length === 0) return prev;
+      if (existingMovingIds.length === 0) {
+        return prev;
+      }
 
-      const newGroup = createRaceGroup(movableIds);
+      const removedGroupIndexes = prev
+        .map((group, index) =>
+          group.athleteIds.every((id) => existingMovingIds.includes(id))
+            ? index
+            : -1,
+        )
+        .filter((index) => index !== -1);
       const updatedGroups = prev
         .map((group) => ({
           ...group,
           athleteIds: group.athleteIds.filter(
-            (athleteId) => !movableIds.includes(athleteId),
+            (id) => !existingMovingIds.includes(id),
           ),
         }))
         .filter((group) => group.athleteIds.length > 0);
+      const removedBeforeInsertCount = removedGroupIndexes.filter(
+        (index) => index < insertIndex,
+      ).length;
+      const adjustedInsertIndex = insertIndex - removedBeforeInsertCount;
+      const safeInsertIndex = Math.max(
+        0,
+        Math.min(adjustedInsertIndex, updatedGroups.length),
+      );
+      const newGroup = createRaceGroup(existingMovingIds);
 
-      return [...updatedGroups, newGroup];
+      return [
+        ...updatedGroups.slice(0, safeInsertIndex),
+        newGroup,
+        ...updatedGroups.slice(safeInsertIndex),
+      ];
     });
-    setSelectedAthleteIds([]);
+    setSelectedAthleteIds((prev) =>
+      prev.filter((id) => !movingIds.includes(id)),
+    );
+  };
+
+  const getRaceNewGroupInsertIndex = (x: number, y: number) => {
+    const groupElements = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-race-group-id]"),
+    ).filter((element) => element.closest("[data-race-drop-zone]"));
+
+    if (groupElements.length === 0) return 0;
+
+    for (let index = 0; index < groupElements.length; index += 1) {
+      const rect = groupElements[index].getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+
+      if (y < rect.top) return index;
+      if (y <= rect.bottom && x < centerX) return index;
+      if (y < centerY && index === 0) return 0;
+    }
+
+    return groupElements.length;
+  };
+
+  const getRaceAthleteDropTarget = (x: number, y: number) => {
+    const dropTarget = document.elementFromPoint(x, y);
+    const targetGroupId =
+      dropTarget
+        ?.closest<HTMLElement>("[data-race-group-id]")
+        ?.dataset.raceGroupId ?? null;
+    const isInsideRaceDropZone = Boolean(
+      dropTarget?.closest("[data-race-drop-zone]"),
+    );
+    const isOverControl = Boolean(
+      dropTarget?.closest(
+        "button, input, textarea, select, a, [data-race-drop-control]",
+      ),
+    );
+
+    return {
+      targetGroupId,
+      isNewGroupTarget:
+        isInsideRaceDropZone && targetGroupId === null && !isOverControl,
+      newGroupIndex: getRaceNewGroupInsertIndex(x, y),
+    };
+  };
+
+  const startRaceAthleteDrag = (
+    event: PointerEvent<HTMLButtonElement>,
+    athleteId: string,
+  ) => {
+    if (isLiveViewer || raceStatus === "setup") return;
+    const usesLongPress = event.pointerType !== "mouse";
+
+    raceAthleteDragStartRef.current = {
+      athleteId,
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      x: event.clientX,
+      y: event.clientY,
+    };
+    raceAthleteDragActiveRef.current = false;
+    raceAthleteDragReadyRef.current = !usesLongPress;
+    if (raceAthleteLongPressTimeoutRef.current !== null) {
+      window.clearTimeout(raceAthleteLongPressTimeoutRef.current);
+    }
+    if (usesLongPress) {
+      raceAthleteLongPressTimeoutRef.current = window.setTimeout(() => {
+        const dragStart = raceAthleteDragStartRef.current;
+        if (!dragStart || dragStart.pointerId !== event.pointerId) return;
+
+        raceAthleteDragReadyRef.current = true;
+        raceAthleteDragActiveRef.current = true;
+        suppressRaceAthleteClickRef.current = true;
+        setRaceAthleteDrag({
+          athleteId,
+          x: dragStart.x,
+          y: dragStart.y,
+          isNewGroupTarget: false,
+          newGroupIndex: raceGroups.length,
+        });
+      }, 350);
+    }
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const moveRaceAthleteDrag = (event: PointerEvent<HTMLButtonElement>) => {
+    const dragStart = raceAthleteDragStartRef.current;
+    if (!dragStart || dragStart.pointerId !== event.pointerId) return;
+
+    const distance = Math.hypot(
+      event.clientX - dragStart.x,
+      event.clientY - dragStart.y,
+    );
+
+    if (!raceAthleteDragReadyRef.current) {
+      if (distance > 10) {
+        if (raceAthleteLongPressTimeoutRef.current !== null) {
+          window.clearTimeout(raceAthleteLongPressTimeoutRef.current);
+          raceAthleteLongPressTimeoutRef.current = null;
+        }
+        raceAthleteDragStartRef.current = null;
+      }
+      return;
+    }
+
+    if (distance < 6 && !raceAthleteDragActiveRef.current) return;
+
+    raceAthleteDragActiveRef.current = true;
+    event.preventDefault();
+    const dropTarget = getRaceAthleteDropTarget(event.clientX, event.clientY);
+    setRaceAthleteDrag({
+      athleteId: dragStart.athleteId,
+      x: event.clientX,
+      y: event.clientY,
+      isNewGroupTarget: dropTarget.isNewGroupTarget,
+      newGroupIndex: dropTarget.newGroupIndex,
+    });
+  };
+
+  const endRaceAthleteDrag = (event: PointerEvent<HTMLButtonElement>) => {
+    const dragStart = raceAthleteDragStartRef.current;
+    if (!dragStart || dragStart.pointerId !== event.pointerId) return;
+
+    raceAthleteDragStartRef.current = null;
+    raceAthleteDragReadyRef.current = false;
+    if (raceAthleteLongPressTimeoutRef.current !== null) {
+      window.clearTimeout(raceAthleteLongPressTimeoutRef.current);
+      raceAthleteLongPressTimeoutRef.current = null;
+    }
+
+    if (!raceAthleteDragActiveRef.current) return;
+
+    raceAthleteDragActiveRef.current = false;
+    suppressRaceAthleteClickRef.current = true;
+    setRaceAthleteDrag(null);
+
+    const dropTarget = getRaceAthleteDropTarget(event.clientX, event.clientY);
+
+    if (dropTarget.targetGroupId) {
+      moveRaceAthleteToGroup(dragStart.athleteId, dropTarget.targetGroupId);
+    } else if (dropTarget.isNewGroupTarget) {
+      moveRaceAthleteToNewGroup(
+        dragStart.athleteId,
+        dropTarget.newGroupIndex,
+      );
+    }
   };
 
   const getAthleteName = (athleteId: string) =>
@@ -587,6 +854,40 @@ export default function App() {
       ? raceAthleteLaps[representativeAthleteId] ?? []
       : [];
   };
+
+  useEffect(() => {
+    if (!isLiveViewer || screen !== "race") {
+      previousViewerRaceLapCountsRef.current = {};
+      hasViewerRaceLapCountsRef.current = false;
+      return;
+    }
+
+    const nextCounts = Object.fromEntries(
+      raceGroups.map((group) => {
+        const representativeAthleteId = group.athleteIds[0];
+        const lapCount = representativeAthleteId
+          ? raceAthleteLaps[representativeAthleteId]?.length ?? 0
+          : 0;
+
+        return [group.id, lapCount];
+      }),
+    );
+
+    if (hasViewerRaceLapCountsRef.current) {
+      raceGroups.forEach((group) => {
+        const previousCount =
+          previousViewerRaceLapCountsRef.current[group.id] ?? 0;
+        const nextCount = nextCounts[group.id] ?? 0;
+
+        if (nextCount > previousCount) {
+          flashRaceLap(group.id);
+        }
+      });
+    }
+
+    previousViewerRaceLapCountsRef.current = nextCounts;
+    hasViewerRaceLapCountsRef.current = true;
+  }, [isLiveViewer, raceAthleteLaps, raceGroups, screen]);
 
   const minutes = Math.floor(sharedElapsedTime / 1000 / 60)
     .toString()
@@ -890,7 +1191,10 @@ export default function App() {
           </h1>
 
           <button
-            onClick={() => setScreen("race")}
+            onClick={() => {
+              resetRaceToInitial();
+              setScreen("race");
+            }}
             className="mb-4 w-full rounded-2xl border border-emerald-500/50 bg-emerald-700 px-5 py-4 text-left font-bold text-white hover:bg-emerald-600 active:scale-[0.98]"
           >
             <span className="text-lg mr-3">Race</span>
@@ -972,9 +1276,111 @@ export default function App() {
     const raceGridStyle = {
       "--stopwatch-columns": raceGridColumns,
     } as CSSProperties;
+    const shouldShowRaceNewGroupPreview = Boolean(
+      raceAthleteDrag?.isNewGroupTarget,
+    );
+    const raceNewGroupPreviewIndex =
+      raceAthleteDrag?.newGroupIndex ?? raceGroups.length;
+    const selectedRaceMoveAthleteIds = getSelectedRaceMoveAthleteIds();
+    const isRaceMoveSelecting = Boolean(
+      selectedRaceMoveAthleteIds.length > 0 &&
+        !raceAthleteDrag &&
+        !isLiveViewer &&
+        raceStatus !== "setup",
+    );
+    const selectedRaceMoveSourceGroupIndexes = raceGroups
+      .map((group, index) =>
+        group.athleteIds.some((athleteId) =>
+          selectedRaceMoveAthleteIds.includes(athleteId),
+        )
+          ? index
+          : -1,
+      )
+      .filter((index) => index !== -1);
+    const firstSelectedRaceMoveSourceGroupIndex =
+      selectedRaceMoveSourceGroupIndexes.length > 0
+        ? Math.min(...selectedRaceMoveSourceGroupIndexes)
+        : -1;
+    const lastSelectedRaceMoveSourceGroupIndex =
+      selectedRaceMoveSourceGroupIndexes.length > 0
+        ? Math.max(...selectedRaceMoveSourceGroupIndexes)
+        : -1;
+
+    const renderRaceSetupNewGroupPreview = () => (
+      <div className="rounded-2xl border border-dashed border-emerald-300/70 bg-emerald-400/10 p-4 opacity-70">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="text-sm font-bold text-emerald-100">
+            New Group
+          </div>
+          <div className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-200">
+            1
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-full border border-emerald-300 bg-emerald-400 px-3 py-2 text-sm font-bold text-black">
+            {raceAthleteDrag ? getAthleteName(raceAthleteDrag.athleteId) : ""}
+          </span>
+        </div>
+      </div>
+    );
+
+    const renderRaceStopwatchNewGroupPreview = () => (
+      <article className="stopwatch-card compact phone-two-column race-stopwatch-card mx-auto border-dashed border-emerald-300/70 bg-emerald-400/10 opacity-70">
+        <div className="stopwatch-card-content">
+          <div className="flex w-full justify-center text-lg font-bold text-emerald-100">
+            +
+          </div>
+
+          <div className="stopwatch-display-panel">
+            <LapLatest
+              laps={[]}
+              formatTimeText={formatTimeText}
+              lapHistory={() => undefined}
+              variant="E"
+              liveLapTime={0}
+              lastLapTime={0}
+            />
+          </div>
+
+          <div className="race-athlete-pills my-3 flex flex-wrap gap-2">
+            <span className="rounded-full border border-emerald-300 bg-emerald-400 px-3 py-2 text-sm font-bold text-black">
+              {raceAthleteDrag ? getAthleteName(raceAthleteDrag.athleteId) : ""}
+            </span>
+          </div>
+
+          <div className="stopwatch-controls-row">
+            <div className="mt-2 grid grid-cols-1 gap-3">
+              <button
+                disabled
+                className="inline-flex items-center justify-center rounded-xl bg-indigo-500 px-4 py-3 text-sm font-semibold text-white opacity-40"
+              >
+                LAP
+              </button>
+            </div>
+          </div>
+        </div>
+      </article>
+    );
+
+    const renderRaceInsertTarget = (insertIndex: number) =>
+      isRaceMoveSelecting &&
+      (insertIndex === firstSelectedRaceMoveSourceGroupIndex ||
+        insertIndex === lastSelectedRaceMoveSourceGroupIndex + 1) ? (
+        <button
+          type="button"
+          onClick={() => moveSelectedRaceAthletesToNewGroup(insertIndex)}
+          className="race-insert-target"
+        >
+          <span>+</span>
+          <span>New Group {insertIndex + 1}</span>
+        </button>
+      ) : null;
 
     return (
-      <main className="min-h-screen bg-black px-4 py-5 pb-24 text-slate-100">
+      <main
+        data-race-drop-zone
+        className="min-h-screen bg-black px-4 py-5 pb-24 text-slate-100"
+      >
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
           {isLiveViewer && (
             <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-center text-sm font-semibold text-emerald-100">
@@ -1040,7 +1446,10 @@ export default function App() {
               className="w-full rounded-lg border border-emerald-500/30 bg-slate-950 px-3 py-2 text-xs text-emerald-100"
             />
           )}
-          <div className="mobile-bottom-nav fixed bottom-0 left-0 z-40 w-full border-t border-slate-700 bg-slate-900/95 backdrop-blur xl:hidden">
+          <div
+            data-race-drop-control
+            className="mobile-bottom-nav fixed bottom-0 left-0 z-40 w-full border-t border-slate-700 bg-slate-900/95 backdrop-blur xl:hidden"
+          >
             {viewerUrl && !isLiveViewer && (
               <div className="fixed bottom-16 left-3 right-3 z-40 rounded-xl border border-emerald-500/30 bg-slate-950/95 p-2">
                 <input
@@ -1064,7 +1473,7 @@ export default function App() {
                   onClick={cycleRaceGridColumns}
                   className="h-full w-full border-r border-slate-700 text-sm font-bold text-slate-200"
                 >
-                  {raceGridColumns}蛻・
+                  {raceGridColumns}列
                 </button>
               )}
               <button
@@ -1085,7 +1494,7 @@ export default function App() {
                   onClick={cycleRaceGridColumns}
                   className="h-full w-full border-r border-slate-700 text-sm font-bold text-slate-200"
                 >
-                  {raceGridColumns}蛻・
+                  {raceGridColumns}列
                 </button>
               )}
               <button
@@ -1117,6 +1526,14 @@ export default function App() {
                 <section className="rounded-2xl border border-slate-700 bg-slate-900/80 p-4">
                   <div className="mb-3 flex items-center justify-between">
                     <h2 className="text-lg font-bold">Athletes</h2>
+                    {!isLiveViewer && (
+                      <button
+                        onClick={addAthlete}
+                        className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-bold text-slate-100 hover:bg-slate-700"
+                      >
+                        Add
+                      </button>
+                    )}
                   </div>
 
                   <div className="grid gap-2">
@@ -1161,42 +1578,65 @@ export default function App() {
                         style={raceGridStyle}
                       >
                         {raceGroups.map((group, index) => (
-                          <div
-                            key={group.id}
-                            className="rounded-2xl border border-slate-700 bg-slate-950/70 p-4"
-                          >
-                            <div className="mb-3 flex items-center justify-between gap-3">
-                              <div className="text-sm font-bold text-slate-100">
-                                Group {index + 1}
+                          <Fragment key={group.id}>
+                            {renderRaceInsertTarget(index)}
+                            {shouldShowRaceNewGroupPreview &&
+                              raceNewGroupPreviewIndex === index &&
+                              renderRaceSetupNewGroupPreview()}
+                            <div
+                              data-race-group-id={group.id}
+                              onClick={() =>
+                                moveSelectedRaceAthletesToGroup(group.id)
+                              }
+                              className={`rounded-2xl border border-slate-700 bg-slate-950/70 p-4 ${
+                                isRaceMoveSelecting ? "race-move-target" : ""
+                              }`}
+                            >
+                              <div className="mb-3 flex items-center justify-between gap-3">
+                                <div className="text-sm font-bold text-slate-100">
+                                  Group {index + 1}
+                                </div>
+                                <div className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-200">
+                                  {group.athleteIds.length}
+                                </div>
                               </div>
-                              <div className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-bold text-emerald-200">
-                                {group.athleteIds.length}
-                              </div>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {group.athleteIds.map((athleteId) => {
-                                const selected =
-                                  selectedAthleteIds.includes(athleteId);
+                              <div className="flex flex-wrap gap-2">
+                                {group.athleteIds.map((athleteId) => {
+                                  const selected =
+                                    selectedAthleteIds.includes(athleteId);
 
-                                return (
-                                  <button
-                                    key={athleteId}
-                                    onClick={() =>
-                                      toggleAthleteSelection(athleteId)
-                                    }
-                                    className={`rounded-full border px-3 py-2 text-sm font-bold ${
-                                      selected
-                                        ? "border-emerald-300 bg-emerald-400 text-black"
-                                        : "border-slate-600 bg-slate-800 text-slate-100"
-                                    }`}
-                                  >
-                                    {getAthleteName(athleteId)}
-                                  </button>
-                                );
-                              })}
+                                  return (
+                                    <button
+                                      key={athleteId}
+                                      onPointerDown={(e) =>
+                                        startRaceAthleteDrag(e, athleteId)
+                                      }
+                                      onPointerMove={moveRaceAthleteDrag}
+                                      onPointerUp={endRaceAthleteDrag}
+                                      onPointerCancel={endRaceAthleteDrag}
+                                      onContextMenu={(e) => e.preventDefault()}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleAthleteSelection(athleteId)
+                                      }}
+                                      className={`touch-none rounded-full border px-3 py-2 text-sm font-bold ${
+                                        selected
+                                          ? "border-emerald-300 bg-emerald-400 text-black"
+                                          : "border-slate-600 bg-slate-800 text-slate-100"
+                                      }`}
+                                    >
+                                      {getAthleteName(athleteId)}
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
-                          </div>
+                          </Fragment>
                         ))}
+                        {shouldShowRaceNewGroupPreview &&
+                          raceNewGroupPreviewIndex >= raceGroups.length &&
+                          renderRaceSetupNewGroupPreview()}
+                        {renderRaceInsertTarget(raceGroups.length)}
                       </div>
                     </div>
                   )}
@@ -1212,40 +1652,41 @@ export default function App() {
                 const lastTotalTime = latest?.totalTime ?? 0;
                 const liveLapTime = raceElapsedTime - lastTotalTime;
                 const lastLapTime = latest?.lapTime ?? 0;
+                const isLapFlashing = raceLapFlashGroupIds.includes(group.id);
                 return (
+                  <Fragment key={group.id}>
+                    {renderRaceInsertTarget(index)}
+                    {shouldShowRaceNewGroupPreview &&
+                      raceNewGroupPreviewIndex === index &&
+                      renderRaceStopwatchNewGroupPreview()}
                   <article
-                    key={group.id}
-                    className="stopwatch-card mx-auto"
+                    data-race-group-id={group.id}
+                    onClick={() => moveSelectedRaceAthletesToGroup(group.id)}
+                    className={`stopwatch-card compact phone-two-column race-stopwatch-card mx-auto ${
+                      isLapFlashing ? "race-lap-flash" : ""
+                    } ${isRaceMoveSelecting ? "race-move-target" : ""}`}
                   >
                     <div className="stopwatch-card-content">
-                      <div className="stopwatch-card-header">
-                        <div className="text-sm text-slate-400 w-6 text-center shrink-0">
-                          {index + 1}
-                        </div>
-                        <div className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-center text-sm font-bold text-slate-100">
-                          Group {index + 1}
-                        </div>
-                        <button
-                          onClick={() => toggleRaceLapHistory(group.id)}
-                          className="stopwatch-icon-button bg-slate-700"
-                        >
-                          {groupDisplayLaps.length}
-                        </button>
+                      <div className="flex w-full justify-center text-lg font-bold tabular-nums text-slate-100">
+                        Group {index + 1}
                       </div>
 
                       <div className="stopwatch-display-panel">
                         <LapLatest
                           laps={groupDisplayLaps}
                           formatTimeText={formatTimeText}
-                          lapHistory={() => toggleRaceLapHistory(group.id)}
-                          variant="B"
+                          lapHistory={
+                            isRaceMoveSelecting
+                              ? () => undefined
+                              : () => toggleRaceLapHistory(group.id)
+                          }
+                          variant="E"
                           liveLapTime={liveLapTime}
                           lastLapTime={lastLapTime}
                         />
-
                       </div>
 
-                      <div className="my-3 flex flex-wrap gap-2">
+                      <div className="race-athlete-pills my-3 flex flex-wrap gap-2">
                         {group.athleteIds.map((athleteId) => {
                           const selected =
                             selectedAthleteIds.includes(athleteId);
@@ -1253,8 +1694,18 @@ export default function App() {
                           return (
                             <button
                               key={athleteId}
-                              onClick={() => toggleAthleteSelection(athleteId)}
-                              className={`rounded-full border px-3 py-2 text-sm font-bold ${
+                              onPointerDown={(e) =>
+                                startRaceAthleteDrag(e, athleteId)
+                              }
+                              onPointerMove={moveRaceAthleteDrag}
+                              onPointerUp={endRaceAthleteDrag}
+                              onPointerCancel={endRaceAthleteDrag}
+                              onContextMenu={(e) => e.preventDefault()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleAthleteSelection(athleteId);
+                              }}
+                              className={`touch-none rounded-full border px-3 py-2 text-sm font-bold ${
                                 selected
                                   ? "border-emerald-300 bg-emerald-400 text-black"
                                   : "border-slate-600 bg-slate-800 text-slate-100"
@@ -1269,7 +1720,10 @@ export default function App() {
                       <div className="stopwatch-controls-row">
                         <div className="mt-2 grid grid-cols-1 gap-3">
                           <button
-                            onClick={() => lapRaceGroup(group.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              lapRaceGroup(group.id);
+                            }}
                             disabled={raceStatus !== "running"}
                             className="inline-flex items-center justify-center rounded-xl bg-indigo-500 px-4 py-3 text-sm font-semibold text-white shadow-sm shadow-indigo-500/20 ring-1 ring-inset ring-white/10 transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-40"
                           >
@@ -1308,21 +1762,21 @@ export default function App() {
                       </div>
                     )}
                   </article>
+                  </Fragment>
                 );
               })}
+              {shouldShowRaceNewGroupPreview &&
+                raceNewGroupPreviewIndex >= raceGroups.length &&
+                renderRaceStopwatchNewGroupPreview()}
+              {renderRaceInsertTarget(raceGroups.length)}
                 </section>
               )}
             </div>
 
-            <div className="hidden flex-col gap-2 self-start xl:flex">
-              {(raceStatus === "setup" || isRaceEditing) && !isLiveViewer && (
-                <button
-                  onClick={addAthlete}
-                  className="rounded-full bg-slate-800 px-4 py-2 text-sm font-bold hover:bg-slate-700"
-                >
-                  Add
-                </button>
-              )}
+            <div
+              data-race-drop-control
+              className="hidden flex-col gap-2 self-start xl:flex"
+            >
               <button
                 onClick={() => setShowHistory(true)}
                 className="rounded-full bg-slate-800 px-4 py-2 text-sm font-bold hover:bg-slate-700"
@@ -1415,39 +1869,35 @@ export default function App() {
               </div>
             </div>
           )}
+          {raceAthleteDrag && (
+            <div
+              className="pointer-events-none fixed z-[70] -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-300 bg-emerald-400 px-3 py-2 text-sm font-bold text-black shadow-2xl shadow-emerald-950/40"
+              style={{
+                left: raceAthleteDrag.x,
+                top: raceAthleteDrag.y,
+              }}
+            >
+              {getAthleteName(raceAthleteDrag.athleteId)}
+            </div>
+          )}
           {selectedAthleteIds.length > 0 && !isLiveViewer && raceStatus !== "setup" && (
             <div className="fixed bottom-14 left-0 z-50 w-full border-t border-slate-700 bg-slate-950/95 p-3 text-slate-100 shadow-2xl backdrop-blur xl:bottom-0">
-              <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-2">
-                <div className="mr-2 text-sm font-bold text-emerald-200">
-                  {selectedAthleteIds.length} selected
+              <div className="mx-auto flex max-w-5xl items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-bold text-emerald-200">
+                    {selectedAthleteIds.length === 1
+                      ? `${getAthleteName(selectedAthleteIds[0])} selected`
+                      : `${selectedAthleteIds.length} athletes selected`}
+                  </div>
+                  <div className="text-xs text-slate-400">
+                    Tap a stopwatch or a + gap
+                  </div>
                 </div>
                 <button
-                  onClick={moveSelectedAthletesToNewGroup}
-                  className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold hover:bg-emerald-600"
-                >
-                  New Group
-                </button>
-                {raceGroups.map((group, index) => {
-                  const hasSelectedInGroup = selectedAthleteIds.some(
-                    (athleteId) => group.athleteIds.includes(athleteId),
-                  );
-
-                  return (
-                    <button
-                      key={group.id}
-                      onClick={() => moveSelectedAthletesToGroup(group.id)}
-                      disabled={hasSelectedInGroup}
-                      className="rounded-xl bg-slate-800 px-4 py-2 text-sm font-bold hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Move to G{index + 1}
-                    </button>
-                  );
-                })}
-                <button
                   onClick={() => setSelectedAthleteIds([])}
-                  className="ml-auto rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/15"
+                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold hover:bg-white/15"
                 >
-                  Clear
+                  Cancel
                 </button>
               </div>
             </div>

@@ -280,6 +280,7 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-variant-numeric: tabular-nums;
   line-height: 1.05;
+  text-align: center;
 }
 
 .lap-latest-phone-live {
@@ -288,6 +289,7 @@ body {
   font-size: min(20cqw, 2.1rem);
   white-space: nowrap;
   color: rgb(248, 250, 252);
+  text-align: center;
 }
 
 .lap-latest-phone-last {
@@ -296,6 +298,7 @@ body {
   font-size: min(14cqw, 1.45rem);
   white-space: nowrap;
   color: rgb(148, 163, 184);
+  text-align: center;
 }
 
 .phone-primary-time {
@@ -355,6 +358,161 @@ body {
   font-size: min(8cqw, 1rem);
   line-height: 1.1;
   white-space: nowrap;
+}
+
+.race-stopwatch-card .stopwatch-card-content {
+  gap: min(4cqw, 0.55rem);
+}
+
+.race-stopwatch-card {
+  border-radius: 12px;
+  padding: min(4cqw, 0.65rem);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.race-stopwatch-card.race-lap-flash {
+  animation: race-lap-card-flash 260ms ease-out;
+  border-color: rgba(16, 185, 129, 0.8);
+  box-shadow:
+    0 0 0 1px rgba(16, 185, 129, 0.55),
+    0 0 26px rgba(16, 185, 129, 0.35);
+}
+
+.race-stopwatch-card.race-lap-flash .stopwatch-display-panel {
+  animation: race-lap-panel-flash 260ms ease-out;
+}
+
+.race-stopwatch-card.race-lap-flash .stopwatch-controls-row button {
+  filter: brightness(1.35);
+}
+
+.race-move-target {
+  cursor: pointer;
+  border-color: rgba(16, 185, 129, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.22);
+}
+
+.race-move-target:hover,
+.race-move-target:active {
+  border-color: rgba(16, 185, 129, 0.8);
+  box-shadow:
+    inset 0 0 0 1px rgba(16, 185, 129, 0.45),
+    0 0 18px rgba(16, 185, 129, 0.22);
+}
+
+.race-insert-target {
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  min-height: min(12cqw, 2.25rem);
+  align-items: center;
+  justify-content: center;
+  gap: min(2cqw, 0.35rem);
+  justify-self: stretch;
+  border: 1px dashed rgba(16, 185, 129, 0.7);
+  border-radius: min(4cqw, 0.7rem);
+  background: rgba(16, 185, 129, 0.1);
+  color: rgb(167, 243, 208);
+  font-size: min(4.5cqw, 0.78rem);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.race-insert-target:hover,
+.race-insert-target:active {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(110, 231, 183, 0.95);
+}
+
+.race-stopwatch-card .stopwatch-display-panel {
+  justify-content: center;
+  min-height: min(23cqw, 4.35rem);
+  padding: min(1.25cqw, 0.2rem) min(4cqw, 0.75rem);
+  border-radius: min(6cqw, 0.9rem);
+}
+
+.race-stopwatch-card .lap-latest-phone {
+  display: grid;
+  gap: 0;
+  place-items: center;
+  line-height: 0.95;
+}
+
+.race-stopwatch-card .lap-latest-phone-live {
+  font-size: min(19cqw, 2.6rem);
+  line-height: 0.95;
+}
+
+.race-stopwatch-card .lap-latest-phone-last {
+  font-size: min(13cqw, 1.78rem);
+  line-height: 0.95;
+}
+
+.race-stopwatch-card .race-athlete-pills {
+  min-height: min(11cqw, 2.35rem);
+  align-content: flex-start;
+  gap: min(2.5cqw, 0.4rem);
+  margin-block: min(2.5cqw, 0.45rem);
+}
+
+.race-stopwatch-card .race-athlete-pills button,
+.race-stopwatch-card .race-athlete-pills span {
+  min-width: min(12cqw, 2.35rem);
+  height: min(12cqw, 2.35rem);
+  padding: 0 min(3cqw, 0.55rem);
+  border-radius: 999px;
+  font-size: min(5.5cqw, 0.9rem);
+  line-height: 1;
+}
+
+.stopwatch-card.phone-two-column.race-stopwatch-card .stopwatch-controls-row .grid {
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: 0;
+  width: 100%;
+  gap: 0;
+}
+
+.stopwatch-card.phone-two-column.race-stopwatch-card .stopwatch-controls-row button {
+  width: 100%;
+  height: min(11.7cqw, 1.9rem);
+  border-radius: min(3.5cqw, 0.5rem);
+  padding-block: min(1.4cqw, 0.22rem);
+  font-size: min(4.5cqw, 0.75rem);
+}
+
+@keyframes race-lap-card-flash {
+  0% {
+    transform: scale(1);
+  }
+
+  35% {
+    transform: scale(0.985);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes race-lap-panel-flash {
+  0% {
+    background: linear-gradient(
+      to bottom,
+      rgba(16, 185, 129, 0.32),
+      rgba(16, 185, 129, 0.16)
+    );
+  }
+
+  100% {
+    background: linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.1),
+      rgba(255, 255, 255, 0.05)
+    );
+  }
 }
 
 .lap-modal-overlay {
