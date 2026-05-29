@@ -9,7 +9,6 @@ import {
 } from "react";
 import { StopwatchCard } from "./stopwatchCard";
 import { LapTable } from "./LapTable";
-import { LapLatest } from "./LapLatest";
 import { Analytics } from "@vercel/analytics/react";
 import { INFO } from "./info";
 import { supabase } from "./lib/supabase";
@@ -35,9 +34,11 @@ type Screen = "home" | "stopwatch" | "race";
 type Variant = "A" | "B" | "C" | "D" | "D2" | "E";
 type GridColumns = 1 | 2 | 3 | 4;
 type RaceStatus = "setup" | "ready" | "running" | "stopped";
+type AthleteColor = "white" | "green" | "blue" | "red";
 type Athlete = {
   id: string;
   name: string;
+  color: AthleteColor;
 };
 type RaceGroup = {
   id: string;
@@ -56,6 +57,7 @@ type StopwatchLiveSnapshot = {
 };
 type RaceLiveSnapshot = {
   mode: "race";
+  raceTitle?: string;
   athletes: Athlete[];
   raceGroups: RaceGroup[];
   raceAthleteLaps: Record<string, Lap[]>;
@@ -83,9 +85,9 @@ export default function App() {
   });
 
   const createInitialRaceAthletes = (): Athlete[] => [
-    { id: "athlete-1", name: "" },
-    { id: "athlete-2", name: "" },
-    { id: "athlete-3", name: "" },
+    { id: "athlete-1", name: "", color: "white" },
+    { id: "athlete-2", name: "", color: "white" },
+    { id: "athlete-3", name: "", color: "white" },
   ];
 
   const [stopwatches, setStopwatches] = useState<StopwatchItem[]>([
@@ -116,8 +118,10 @@ export default function App() {
     useState<"idle" | "running" | "stopped">("idle");
   const [liveRoomId, setLiveRoomId] = useState<string | null>(initialRoomId);
   const [liveRole, setLiveRole] = useState<LiveRole>(initialRole);
-  const [liveStatus, setLiveStatus] = useState("offline");
+  const [, setLiveStatus] = useState("offline");
   const [viewerUrl, setViewerUrl] = useState("");
+  const [viewerUrlCopied, setViewerUrlCopied] = useState(false);
+  const [raceTitle, setRaceTitle] = useState("");
   const [athletes, setAthletes] = useState<Athlete[]>(
     createInitialRaceAthletes,
   );
@@ -376,7 +380,11 @@ export default function App() {
     while (existingIds.has(`athlete-${nextIndex}`)) {
       nextIndex += 1;
     }
-    const newAthlete = { id: `athlete-${nextIndex}`, name: "" };
+    const newAthlete: Athlete = {
+      id: `athlete-${nextIndex}`,
+      name: "",
+      color: "white",
+    };
 
     setAthletes((prev) => [
       ...prev,
@@ -486,6 +494,7 @@ export default function App() {
 
   const resetRaceToInitial = () => {
     if (isLiveViewer) return;
+    setRaceTitle("");
     setAthletes(createInitialRaceAthletes());
     setRaceGroups([]);
     setRaceAthleteLaps({});
@@ -512,6 +521,15 @@ export default function App() {
         group.id === groupId
           ? { ...group, showLaps: !group.showLaps }
           : group,
+      ),
+    );
+  };
+
+  const updateAthleteColor = (id: string, color: AthleteColor) => {
+    if (isLiveViewer) return;
+    setAthletes((prev) =>
+      prev.map((athlete) =>
+        athlete.id === id ? { ...athlete, color } : athlete,
       ),
     );
   };
@@ -847,6 +865,38 @@ export default function App() {
   const getAthleteName = (athleteId: string) =>
     athletes.find((athlete) => athlete.id === athleteId)?.name || "Unnamed";
 
+  const getAthleteInitial = (athleteId: string) => {
+    const name =
+      athletes.find((athlete) => athlete.id === athleteId)?.name.trim() ?? "";
+
+    return Array.from(name)[0] ?? "?";
+  };
+
+  const normalizeAthlete = (athlete: Athlete): Athlete => ({
+    ...athlete,
+    color: athlete.color ?? "white",
+  });
+
+  const getAthleteColor = (athleteId: string): AthleteColor =>
+    athletes.find((athlete) => athlete.id === athleteId)?.color ?? "white";
+
+  const athleteColorStyles: Record<AthleteColor, CSSProperties> = {
+    white: { borderColor: "rgb(226, 232, 240)" },
+    green: { borderColor: "rgb(52, 211, 153)" },
+    blue: { borderColor: "rgb(96, 165, 250)" },
+    red: { borderColor: "rgb(248, 113, 113)" },
+  };
+
+  const athleteColorSwatches: Array<{
+    color: AthleteColor;
+    className: string;
+  }> = [
+    { color: "white", className: "bg-slate-100" },
+    { color: "green", className: "bg-emerald-400" },
+    { color: "blue", className: "bg-blue-400" },
+    { color: "red", className: "bg-red-400" },
+  ];
+
   const getGroupDisplayLaps = (group: RaceGroup) => {
     const representativeAthleteId = group.athleteIds[0];
 
@@ -1021,6 +1071,21 @@ export default function App() {
     if (screen !== "race") params.set("v", variant);
     const url = `${window.location.origin}${window.location.pathname}?${params}`;
     setViewerUrl(url);
+    setViewerUrlCopied(false);
+  };
+
+  const copyViewerUrl = async () => {
+    if (!viewerUrl) return;
+
+    try {
+      await navigator.clipboard.writeText(viewerUrl);
+      setViewerUrlCopied(true);
+      window.setTimeout(() => setViewerUrlCopied(false), 1400);
+    } catch {
+      document
+        .querySelector<HTMLInputElement>("[data-viewer-url-input]")
+        ?.select();
+    }
   };
 
   const goHome = () => {
@@ -1045,7 +1110,8 @@ export default function App() {
     const now = Date.now();
     if (snapshot.mode === "race") {
       setScreen("race");
-      setAthletes(snapshot.athletes);
+      setRaceTitle(snapshot.raceTitle ?? "");
+      setAthletes(snapshot.athletes.map(normalizeAthlete));
       setRaceAthleteLaps(snapshot.raceAthleteLaps ?? {});
       setRaceElapsedTime(snapshot.raceElapsedTime);
       setRaceStartedAt(
@@ -1106,6 +1172,7 @@ export default function App() {
       screen === "race"
         ? {
             mode: "race",
+            raceTitle,
             athletes,
             raceGroups,
             raceAthleteLaps,
@@ -1127,6 +1194,7 @@ export default function App() {
     raceAthleteLaps,
     raceGroups,
     raceStatus,
+    raceTitle,
     screen,
     sharedElapsedTime,
     sharedStatus,
@@ -1317,8 +1385,17 @@ export default function App() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <span className="rounded-full border border-emerald-300 bg-emerald-400 px-3 py-2 text-sm font-bold text-black">
-            {raceAthleteDrag ? getAthleteName(raceAthleteDrag.athleteId) : ""}
+          <span
+            className="rounded-full border-2 bg-emerald-400 px-3 py-2 text-sm font-bold text-black"
+            style={
+              raceAthleteDrag
+                ? athleteColorStyles[getAthleteColor(raceAthleteDrag.athleteId)]
+                : undefined
+            }
+          >
+            {raceAthleteDrag
+              ? getAthleteInitial(raceAthleteDrag.athleteId)
+              : ""}
           </span>
         </div>
       </div>
@@ -1332,19 +1409,26 @@ export default function App() {
           </div>
 
           <div className="stopwatch-display-panel">
-            <LapLatest
-              laps={[]}
-              formatTimeText={formatTimeText}
-              lapHistory={() => undefined}
-              variant="E"
-              liveLapTime={0}
-              lastLapTime={0}
-            />
+            {renderRaceTimeStack({
+              liveLapTime: 0,
+              lastLapTime: 0,
+              splitTime: 0,
+              onClick: () => undefined,
+            })}
           </div>
 
-          <div className="race-athlete-pills my-3 flex flex-wrap gap-2">
-            <span className="rounded-full border border-emerald-300 bg-emerald-400 px-3 py-2 text-sm font-bold text-black">
-              {raceAthleteDrag ? getAthleteName(raceAthleteDrag.athleteId) : ""}
+          <div className="race-athlete-pills flex flex-wrap">
+            <span
+              className="rounded-full border-2 bg-emerald-400 px-3 py-2 text-sm font-bold text-black"
+              style={
+                raceAthleteDrag
+                  ? athleteColorStyles[getAthleteColor(raceAthleteDrag.athleteId)]
+                  : undefined
+              }
+            >
+              {raceAthleteDrag
+                ? getAthleteInitial(raceAthleteDrag.athleteId)
+                : ""}
             </span>
           </div>
 
@@ -1361,6 +1445,65 @@ export default function App() {
         </div>
       </article>
     );
+
+    const renderRaceTimeStack = ({
+      liveLapTime,
+      lastLapTime,
+      splitTime,
+      onClick,
+    }: {
+      liveLapTime: number;
+      lastLapTime: number;
+      splitTime: number;
+      onClick: () => void;
+    }) => {
+      const formatLapSecondsText = (ms: number) => {
+        const seconds = Math.floor(ms / 1000);
+        const tenths = Math.floor((ms % 1000) / 100);
+
+        return `${seconds}.${tenths}`;
+      };
+
+      const formatSplitTimeText = (ms: number) => {
+        const minutes = Math.floor(ms / 60000);
+        const seconds = Math.floor((ms % 60000) / 1000)
+          .toString()
+          .padStart(2, "0");
+
+        return `${minutes}:${seconds}`;
+      };
+
+      return (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onClick();
+          }}
+          className="race-time-stack"
+        >
+          <span className="race-time-secondary-grid">
+            <span className="race-time-secondary">
+              <span className="race-time-label">LAST</span>
+              <span className="race-time-secondary-value">
+                {formatLapSecondsText(lastLapTime)}
+              </span>
+            </span>
+            <span className="race-time-secondary">
+              <span className="race-time-label">SPLIT</span>
+              <span className="race-time-secondary-value">
+                {formatSplitTimeText(splitTime)}
+              </span>
+          </span>
+        </span>
+        <span className="race-time-live-block">
+          <span className="race-time-live-value">
+            {formatLapSecondsText(liveLapTime)}
+          </span>
+          </span>
+        </button>
+      );
+    };
 
     const renderRaceInsertTarget = (insertIndex: number) =>
       isRaceMoveSelecting &&
@@ -1382,14 +1525,19 @@ export default function App() {
         className="min-h-screen bg-black px-4 py-5 pb-24 text-slate-100"
       >
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+          <input
+            value={raceTitle}
+            onChange={(e) => {
+              if (isLiveViewer) return;
+              setRaceTitle(e.target.value);
+            }}
+            readOnly={isLiveViewer}
+            placeholder="Race title"
+            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-center text-base font-bold text-slate-100 outline-none placeholder:text-slate-500 focus:border-emerald-400"
+          />
           {isLiveViewer && (
             <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-center text-sm font-semibold text-emerald-100">
               Live viewer mode
-            </div>
-          )}
-          {liveRoomId && (
-            <div className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-2 text-center text-xs text-slate-300">
-              room: {liveRoomId} / realtime: {liveStatus}
             </div>
           )}
           <header className="flex items-center justify-between gap-3">
@@ -1438,28 +1586,10 @@ export default function App() {
               )}
             </div>
           </header>
-          {viewerUrl && !isLiveViewer && (
-            <input
-              readOnly
-              value={viewerUrl}
-              onFocus={(e) => e.currentTarget.select()}
-              className="w-full rounded-lg border border-emerald-500/30 bg-slate-950 px-3 py-2 text-xs text-emerald-100"
-            />
-          )}
           <div
             data-race-drop-control
             className="mobile-bottom-nav fixed bottom-0 left-0 z-40 w-full border-t border-slate-700 bg-slate-900/95 backdrop-blur xl:hidden"
           >
-            {viewerUrl && !isLiveViewer && (
-              <div className="fixed bottom-16 left-3 right-3 z-40 rounded-xl border border-emerald-500/30 bg-slate-950/95 p-2">
-                <input
-                  readOnly
-                  value={viewerUrl}
-                  onFocus={(e) => e.currentTarget.select()}
-                  className="w-full rounded-lg bg-black px-3 py-2 text-xs text-emerald-100"
-                />
-              </div>
-            )}
             <div className="grid h-14 w-full grid-cols-5">
               {(raceStatus === "setup" || isRaceEditing) && !isLiveViewer ? (
                 <button
@@ -1540,11 +1670,8 @@ export default function App() {
                     {athletes.map((athlete, index) => (
                       <div
                         key={athlete.id}
-                        className="grid grid-cols-[2rem_minmax(0,1fr)_2.5rem] items-center gap-2"
+                        className="grid grid-cols-[minmax(0,1fr)_7.5rem_2.5rem] items-center gap-3"
                       >
-                        <div className="text-right text-sm text-slate-500">
-                          {index + 1}
-                        </div>
                         <input
                           data-athlete-index={index}
                           value={athlete.name}
@@ -1555,6 +1682,25 @@ export default function App() {
                           placeholder="Athlete name"
                           className="min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 outline-none focus:border-emerald-400"
                         />
+                        <div className="flex justify-start gap-1.5">
+                          {athleteColorSwatches.map((swatch) => (
+                            <button
+                              key={swatch.color}
+                              type="button"
+                              onClick={() =>
+                                updateAthleteColor(athlete.id, swatch.color)
+                              }
+                              className={`h-6 w-6 shrink-0 rounded-full border-2 ${
+                                swatch.className
+                              } ${
+                                athlete.color === swatch.color
+                                  ? "border-white"
+                                  : "border-slate-600"
+                              }`}
+                              aria-label={`${swatch.color} border`}
+                            />
+                          ))}
+                        </div>
                         {raceStatus === "setup" ? (
                           <button
                             onClick={() => removeAthlete(athlete.id)}
@@ -1619,13 +1765,14 @@ export default function App() {
                                         e.stopPropagation();
                                         toggleAthleteSelection(athleteId)
                                       }}
+                                      style={athleteColorStyles[getAthleteColor(athleteId)]}
                                       className={`touch-none rounded-full border px-3 py-2 text-sm font-bold ${
                                         selected
                                           ? "border-emerald-300 bg-emerald-400 text-black"
                                           : "border-slate-600 bg-slate-800 text-slate-100"
                                       }`}
                                     >
-                                      {getAthleteName(athleteId)}
+                                      {getAthleteInitial(athleteId)}
                                     </button>
                                   );
                                 })}
@@ -1652,6 +1799,7 @@ export default function App() {
                 const lastTotalTime = latest?.totalTime ?? 0;
                 const liveLapTime = raceElapsedTime - lastTotalTime;
                 const lastLapTime = latest?.lapTime ?? 0;
+                const splitTime = latest?.totalTime ?? 0;
                 const isLapFlashing = raceLapFlashGroupIds.includes(group.id);
                 return (
                   <Fragment key={group.id}>
@@ -1667,26 +1815,22 @@ export default function App() {
                     } ${isRaceMoveSelecting ? "race-move-target" : ""}`}
                   >
                     <div className="stopwatch-card-content">
-                      <div className="flex w-full justify-center text-lg font-bold tabular-nums text-slate-100">
+                      <div className="race-group-title flex w-full justify-center text-lg font-bold tabular-nums text-slate-100">
                         Group {index + 1}
                       </div>
 
                       <div className="stopwatch-display-panel">
-                        <LapLatest
-                          laps={groupDisplayLaps}
-                          formatTimeText={formatTimeText}
-                          lapHistory={
-                            isRaceMoveSelecting
-                              ? () => undefined
-                              : () => toggleRaceLapHistory(group.id)
-                          }
-                          variant="E"
-                          liveLapTime={liveLapTime}
-                          lastLapTime={lastLapTime}
-                        />
+                        {renderRaceTimeStack({
+                          liveLapTime,
+                          lastLapTime,
+                          splitTime,
+                          onClick: isRaceMoveSelecting
+                            ? () => undefined
+                            : () => toggleRaceLapHistory(group.id),
+                        })}
                       </div>
 
-                      <div className="race-athlete-pills my-3 flex flex-wrap gap-2">
+                      <div className="race-athlete-pills flex flex-wrap">
                         {group.athleteIds.map((athleteId) => {
                           const selected =
                             selectedAthleteIds.includes(athleteId);
@@ -1705,13 +1849,14 @@ export default function App() {
                                 e.stopPropagation();
                                 toggleAthleteSelection(athleteId);
                               }}
+                              style={athleteColorStyles[getAthleteColor(athleteId)]}
                               className={`touch-none rounded-full border px-3 py-2 text-sm font-bold ${
                                 selected
                                   ? "border-emerald-300 bg-emerald-400 text-black"
                                   : "border-slate-600 bg-slate-800 text-slate-100"
                               }`}
                             >
-                              {getAthleteName(athleteId)}
+                              {getAthleteInitial(athleteId)}
                             </button>
                           );
                         })}
@@ -1871,13 +2016,50 @@ export default function App() {
           )}
           {raceAthleteDrag && (
             <div
-              className="pointer-events-none fixed z-[70] -translate-x-1/2 -translate-y-1/2 rounded-full border border-emerald-300 bg-emerald-400 px-3 py-2 text-sm font-bold text-black shadow-2xl shadow-emerald-950/40"
+              className="pointer-events-none fixed z-[70] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-300 bg-emerald-400 px-3 py-2 text-sm font-bold text-black shadow-2xl shadow-emerald-950/40"
               style={{
                 left: raceAthleteDrag.x,
                 top: raceAthleteDrag.y,
+                ...athleteColorStyles[getAthleteColor(raceAthleteDrag.athleteId)],
               }}
             >
-              {getAthleteName(raceAthleteDrag.athleteId)}
+              {getAthleteInitial(raceAthleteDrag.athleteId)}
+            </div>
+          )}
+          {viewerUrl && !isLiveViewer && (
+            <div
+              className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4"
+              onClick={() => setViewerUrl("")}
+            >
+              <section
+                className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-950 p-4 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="mb-3 text-center text-sm font-bold text-slate-100">
+                  Share viewer URL
+                </div>
+                <input
+                  data-viewer-url-input
+                  readOnly
+                  value={viewerUrl}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="w-full rounded-lg border border-emerald-500/30 bg-black px-3 py-2 text-xs text-emerald-100"
+                />
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={copyViewerUrl}
+                    className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-600"
+                  >
+                    {viewerUrlCopied ? "Copied" : "Copy"}
+                  </button>
+                  <button
+                    onClick={() => setViewerUrl("")}
+                    className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-slate-100 hover:bg-white/15"
+                  >
+                    Close
+                  </button>
+                </div>
+              </section>
             </div>
           )}
           {selectedAthleteIds.length > 0 && !isLiveViewer && raceStatus !== "setup" && (
@@ -1960,11 +2142,6 @@ export default function App() {
         {isLiveViewer && (
           <div className="mb-3 rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-center text-sm font-semibold text-emerald-100">
             Live viewer mode
-          </div>
-        )}
-        {liveRoomId && (
-          <div className="mb-3 rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-2 text-center text-xs text-slate-300">
-            room: {liveRoomId} / realtime: {liveStatus}
           </div>
         )}
         <div className="flex flex-col xl:flex-row gap-4">
@@ -2064,14 +2241,6 @@ export default function App() {
                 Share
               </button>
             )}
-            {viewerUrl && (
-              <input
-                readOnly
-                value={viewerUrl}
-                onFocus={(e) => e.currentTarget.select()}
-                className="w-44 rounded-lg border border-emerald-500/30 bg-slate-950 px-3 py-2 text-xs text-emerald-100"
-              />
-            )}
             {/* <button
               onClick={() => setShowInfo(true)}
               className="rounded-full bg-slate-800 px-4 py-2 hover:bg-slate-700 text-sm font-bold "
@@ -2087,16 +2256,6 @@ export default function App() {
             </button>
           </div>
           <div className="mobile-bottom-nav fixed bottom-0 left-0 w-full z-50 bg-slate-900/95 backdrop-blur border-t border-slate-700 xl:hidden flex">
-            {viewerUrl && !isLiveViewer && (
-              <div className="fixed bottom-16 left-3 right-3 z-50 rounded-xl border border-emerald-500/30 bg-slate-950/95 p-2">
-                <input
-                  readOnly
-                  value={viewerUrl}
-                  onFocus={(e) => e.currentTarget.select()}
-                  className="w-full rounded-lg bg-black px-3 py-2 text-xs text-emerald-100"
-                />
-              </div>
-            )}
             <div className={`mobile-bottom-nav-grid fixed bottom-0 left-0 z-50 grid h-14 w-full ${isLiveViewer ? "grid-cols-5" : "grid-cols-6"} border-t border-slate-700 bg-slate-900/95 backdrop-blur xl:hidden`}>
               <button
                 onClick={addStopwatch}
@@ -2155,6 +2314,42 @@ export default function App() {
             </div>
           </div>
         </div>
+        {viewerUrl && !isLiveViewer && (
+          <div
+            className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4"
+            onClick={() => setViewerUrl("")}
+          >
+            <section
+              className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-950 p-4 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 text-center text-sm font-bold text-slate-100">
+                Share viewer URL
+              </div>
+              <input
+                data-viewer-url-input
+                readOnly
+                value={viewerUrl}
+                onFocus={(e) => e.currentTarget.select()}
+                className="w-full rounded-lg border border-emerald-500/30 bg-black px-3 py-2 text-xs text-emerald-100"
+              />
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  onClick={copyViewerUrl}
+                  className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-600"
+                >
+                  {viewerUrlCopied ? "Copied" : "Copy"}
+                </button>
+                <button
+                  onClick={() => setViewerUrl("")}
+                  className="rounded-xl bg-white/10 px-4 py-2 text-sm font-bold text-slate-100 hover:bg-white/15"
+                >
+                  Close
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
         {showHistory && (
           <div
             className="modal-overlay pb-24"

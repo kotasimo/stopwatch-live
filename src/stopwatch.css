@@ -360,17 +360,24 @@ body {
   white-space: nowrap;
 }
 
-.race-stopwatch-card .stopwatch-card-content {
-  gap: min(4cqw, 0.55rem);
+.stopwatch-card.phone-two-column.race-stopwatch-card .stopwatch-card-content {
+  gap: min(2.4cqw, 0.36rem);
 }
 
 .race-stopwatch-card {
+  max-width: min(100%, 15.75rem);
   border-radius: 12px;
-  padding: min(4cqw, 0.65rem);
+  padding: min(2.5cqw, 0.36rem);
   transition:
     border-color 140ms ease,
     box-shadow 140ms ease,
     transform 140ms ease;
+}
+
+.race-stopwatch-card .race-group-title {
+  font-size: min(7cqw, 1.05rem);
+  line-height: 1;
+  margin: 0;
 }
 
 .race-stopwatch-card.race-lap-flash {
@@ -427,11 +434,12 @@ body {
   border-color: rgba(110, 231, 183, 0.95);
 }
 
-.race-stopwatch-card .stopwatch-display-panel {
-  justify-content: center;
-  min-height: min(23cqw, 4.35rem);
-  padding: min(1.25cqw, 0.2rem) min(4cqw, 0.75rem);
-  border-radius: min(6cqw, 0.9rem);
+.stopwatch-card.phone-two-column.race-stopwatch-card .stopwatch-display-panel {
+  justify-content: flex-start;
+  min-height: 0;
+  padding: min(2.2cqw, 0.34rem) min(3cqw, 0.5rem);
+  border-radius: min(5cqw, 0.75rem);
+  gap: 0;
 }
 
 .race-stopwatch-card .lap-latest-phone {
@@ -451,15 +459,85 @@ body {
   line-height: 0.95;
 }
 
+.race-time-stack {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.race-time-live-block {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  padding-top: 0;
+}
+
+.race-time-live-value {
+  min-width: 0;
+  overflow: hidden;
+  color: rgb(248, 250, 252);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: min(17cqw, 2.4rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 0.95;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.race-time-secondary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: min(2cqw, 0.35rem);
+  min-width: 0;
+  align-items: start;
+}
+
+.race-time-secondary {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  place-items: center;
+}
+
+.race-time-label {
+  overflow: hidden;
+  color: rgb(148, 163, 184);
+  font-size: min(3.5cqw, 0.6rem);
+  font-weight: 800;
+  line-height: 0.9;
+  text-align: center;
+}
+
+.race-time-secondary-value {
+  min-width: 0;
+  overflow: hidden;
+  color: rgb(203, 213, 225);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: min(9.5cqw, 1.28rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 0.9;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .race-stopwatch-card .race-athlete-pills {
-  min-height: min(11cqw, 2.35rem);
+  min-height: min(6cqw, 1.2rem);
   align-content: flex-start;
-  gap: min(2.5cqw, 0.4rem);
-  margin-block: min(2.5cqw, 0.45rem);
+  gap: 0.25rem;
+  margin-block: min(0.9cqw, 0.14rem);
 }
 
 .race-stopwatch-card .race-athlete-pills button,
 .race-stopwatch-card .race-athlete-pills span {
+  border-width: 2px;
   min-width: min(12cqw, 2.35rem);
   height: min(12cqw, 2.35rem);
   padding: 0 min(3cqw, 0.55rem);
