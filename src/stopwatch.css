@@ -532,7 +532,7 @@ body {
   min-height: min(6cqw, 1.2rem);
   align-content: flex-start;
   gap: 0.25rem;
-  margin-block: min(0.9cqw, 0.14rem);
+  margin-block: min(0.4cqw, 0.06rem) min(0.8cqw, 0.12rem);
 }
 
 .race-stopwatch-card .race-athlete-pills button,

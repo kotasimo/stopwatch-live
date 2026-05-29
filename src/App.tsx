@@ -1819,17 +1819,6 @@ export default function App() {
                         Group {index + 1}
                       </div>
 
-                      <div className="stopwatch-display-panel">
-                        {renderRaceTimeStack({
-                          liveLapTime,
-                          lastLapTime,
-                          splitTime,
-                          onClick: isRaceMoveSelecting
-                            ? () => moveSelectedRaceAthletesToGroup(group.id)
-                            : () => toggleRaceLapHistory(group.id),
-                        })}
-                      </div>
-
                       <div className="race-athlete-pills flex flex-wrap">
                         {group.athleteIds.map((athleteId) => {
                           const selected =
@@ -1859,6 +1848,17 @@ export default function App() {
                               {getAthleteInitial(athleteId)}
                             </button>
                           );
+                        })}
+                      </div>
+
+                      <div className="stopwatch-display-panel">
+                        {renderRaceTimeStack({
+                          liveLapTime,
+                          lastLapTime,
+                          splitTime,
+                          onClick: isRaceMoveSelecting
+                            ? () => moveSelectedRaceAthletesToGroup(group.id)
+                            : () => toggleRaceLapHistory(group.id),
                         })}
                       </div>
 
